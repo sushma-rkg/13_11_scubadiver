@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Scuba Santa</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #0b3d66; }
+  canvas { display: block; width: 100vw; height: 100vh; touch-action: none; }
+</style>
+</head>
+<body>
+<canvas id="sea"></canvas>
+<script>
+(function () {
+  var canvas = document.getElementById('sea');
+  var ctx = canvas.getContext('2d');
+  var W = 0, H = 0, S = 1; // S = size unit that scales with the screen
+
+  var diver = { x: 0, y: 0, vx: 0, vy: 0, face: 1, tilt: 0, kick: 0 };
+  var target = { x: 0, y: 0 };
+  var bubbles = [];
+  var plants = [];
+  var rocks = [];
+  var bubbleTimer = 0;
+  var started = false;
+
+  function resize() {
+    var dpr = window.devicePixelRatio || 1;
+    var oldW = W, oldH = H;
+    W = window.innerWidth; H = window.innerHeight;
+    canvas.width = Math.round(W * dpr);
+    canvas.height = Math.round(H * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    S = Math.max(0.55, Math.min(W, H) / 520);
+    if (!started) {
+      diver.x = target.x = W / 2;
+      diver.y = target.y = H / 2;
+      started = true;
+    } else if (oldW) {
+      diver.x *= W / oldW; diver.y *= H / oldH;
+      target.x *= W / oldW; target.y *= H / oldH;
+    }
+    buildScenery();
+  }
+
+  function buildScenery() {
+    plants = []; rocks = [];
+    var n = Math.max(5, Math.round(W / (110 * S)));
+    for (var i = 0; i < n; i++) {
+      plants.push({ x: (i + 0.3 + Math.random() * 0.4) * W / n, h: (50 + Math.random() * 70) * S, ph: Math.random() * 6.28 });
+    }
+    var r = Math.max(3, Math.round(W / (260 * S)));
+    for (var j = 0; j < r; j++) {
+      rocks.push({ x: (j + 0.5) * W / r + (Math.random() - 0.5) * 60 * S, w: (40 + Math.random() * 50) * S, h: (22 + Math.random() * 26) * S });
+    }
+  }
+
+  // ---- input: mouse follows always; finger follows while touching, stops when lifted
+  function setTarget(e) {
+    if (e.clientX === 0 && e.clientY === 0 && !target.moved) return; // ignore a phantom start-up event
+    target.moved = true; target.x = e.clientX; target.y = e.clientY;
+  }
+  window.addEventListener('pointermove', function (e) { setTarget(e); });
+  window.addEventListener('pointerdown', function (e) { setTarget(e); });
+  function stopHere(e) {
+    if (e.pointerType === 'touch' || e.pointerType === 'pen') { target.x = diver.x; target.y = diver.y; }
+  }
+  window.addEventListener('pointerup', stopHere);
+  window.addEventListener('pointercancel', stopHere);
+  window.addEventListener('resize', resize);
+  document.addEventListener('touchmove', function (e) { e.preventDefault(); }, { passive: false });
+
+  // ---- drawing helpers
+  function drawSea(t) {
+    var g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, '#3ab4e8'); g.addColorStop(0.55, '#1672b3'); g.addColorStop(1, '#0a3560');
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+
+    // soft light rays
+    ctx.save();
+    ctx.globalAlpha = 0.07; ctx.fillStyle = '#fff';
+    for (var i = 0; i < 5; i++) {
+      var bx = ((i + 0.5) / 5) * W + Math.sin(t * 0.3 + i * 2) * 40 * S;
+      ctx.beginPath();
+      ctx.moveTo(bx - 25 * S, 0); ctx.lineTo(bx + 25 * S, 0);
+      ctx.lineTo(bx + 120 * S, H); ctx.lineTo(bx - 60 * S, H);
+      ctx.closePath(); ctx.fill();
+    }
+    ctx.restore();
+
+    // sand
+    var floorY = H - 50 * S;
+    ctx.fillStyle = '#e9cf8f';
+    ctx.beginPath(); ctx.moveTo(0, H);
+    ctx.lineTo(0, floorY + 8 * S);
+    ctx.quadraticCurveTo(W * 0.25, floorY - 14 * S, W * 0.5, floorY + 6 * S);
+    ctx.quadraticCurveTo(W * 0.75, floorY + 22 * S, W, floorY - 4 * S);
+    ctx.lineTo(W, H); ctx.closePath(); ctx.fill();
+
+    // rocks
+    rocks.forEach(function (r) {
+      var y = floorY + 12 * S;
+      ctx.fillStyle = '#6d7a8c';
+      ctx.beginPath(); ctx.ellipse(r.x, y, r.w, r.h, 0, Math.PI, 0); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = '#8795a8';
+      ctx.beginPath(); ctx.ellipse(r.x - r.w * 0.25, y - r.h * 0.2, r.w * 0.45, r.h * 0.5, 0, Math.PI, 0); ctx.closePath(); ctx.fill();
+    });
+
+    // seaweed
+    ctx.lineCap = 'round';
+    plants.forEach(function (p) {
+      var baseY = floorY + 14 * S;
+      ctx.strokeStyle = '#2f9e5b'; ctx.lineWidth = 7 * S;
+      ctx.beginPath(); ctx.moveTo(p.x, baseY);
+      var sway = Math.sin(t * 1.2 + p.ph) * 14 * S;
+      ctx.quadraticCurveTo(p.x + sway, baseY - p.h * 0.5, p.x + sway * 1.6, baseY - p.h);
+      ctx.stroke();
+    });
+  }
+
+  function drawBubbles() {
+    bubbles.forEach(function (b) {
+      ctx.globalAlpha = Math.max(0, Math.min(1, b.life)) * 0.85;
+      ctx.fillStyle = 'rgba(255,255,255,0.25)';
+      ctx.strokeStyle = '#ffffff'; ctx.lineWidth = Math.max(1, b.r * 0.15);
+      ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, 6.2832); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = '#fff';
+      ctx.beginPath(); ctx.arc(b.x - b.r * 0.3, b.y - b.r * 0.3, b.r * 0.22, 0, 6.2832); ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+  }
+
+  // Diver drawn facing right, centred on (0,0); ~150 units long
+  function drawDiver(t) {
+    var kick = Math.sin(diver.kick);
+    ctx.save();
+    ctx.translate(diver.x, diver.y);
+    ctx.scale(S * diver.face, S);
+    ctx.rotate(diver.tilt);
+    ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+
+    // air tank (on back)
+    ctx.fillStyle = '#c9d2dc';
+    roundRect(-46, -30, 20, 52, 9); ctx.fill();
+    ctx.fillStyle = '#8f9bab'; roundRect(-42, -36, 12, 9, 3); ctx.fill();
+
+    // back leg + fin
+    ctx.save();
+    ctx.translate(-30, 8); ctx.rotate(0.15 + kick * 0.35);
+    ctx.fillStyle = '#b91c1c'; roundRect(-48, -7, 52, 15, 7); ctx.fill();
+    ctx.fillStyle = '#1f2937';
+    ctx.beginPath(); ctx.moveTo(-46, 0); ctx.lineTo(-76, -13); ctx.lineTo(-76, 15); ctx.closePath(); ctx.fill();
+    ctx.restore();
+
+    // torso
+    ctx.fillStyle = '#e11d2e';
+    ctx.beginPath(); ctx.ellipse(0, 0, 40, 25, 0, 0, 6.2832); ctx.fill();
+    // belt
+    ctx.fillStyle = '#1f2937'; roundRect(-6, -24, 10, 48, 3); ctx.fill();
+    ctx.fillStyle = '#facc15'; roundRect(-4, -9, 6, 18, 2); ctx.fill();
+
+    // front leg + fin
+    ctx.save();
+    ctx.translate(-28, 10); ctx.rotate(-0.1 - kick * 0.35);
+    ctx.fillStyle = '#e11d2e'; roundRect(-50, -7, 54, 16, 8); ctx.fill();
+    ctx.fillStyle = '#111827';
+    ctx.beginPath(); ctx.moveTo(-48, 1); ctx.lineTo(-80, -13); ctx.lineTo(-80, 16); ctx.closePath(); ctx.fill();
+    ctx.restore();
+
+    // arm reaching forward
+    ctx.save();
+    ctx.translate(14, 6); ctx.rotate(0.25 + kick * 0.2);
+    ctx.fillStyle = '#e11d2e'; roundRect(0, -8, 38, 16, 8); ctx.fill();
+    ctx.fillStyle = '#1f2937'; ctx.beginPath(); ctx.arc(40, 0, 9, 0, 6.2832); ctx.fill();
+    ctx.restore();
+
+    // head
+    ctx.fillStyle = '#f6c9a0';
+    ctx.beginPath(); ctx.arc(44, -14, 19, 0, 6.2832); ctx.fill();
+    // white hair at the back of the head
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath(); ctx.arc(37, -22, 14, Math.PI * 0.55, Math.PI * 1.75); ctx.fill();
+    // mask strap + mask
+    ctx.fillStyle = '#111827'; roundRect(26, -27, 38, 6, 3); ctx.fill();
+    ctx.fillStyle = '#111827'; roundRect(46, -30, 22, 17, 7); ctx.fill();
+    ctx.fillStyle = '#9be7ff'; roundRect(49, -27, 16, 11, 5); ctx.fill();
+    ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(56, -22, 1.8, 0, 6.2832); ctx.fill();
+    // rosy cheek
+    ctx.fillStyle = 'rgba(240,90,90,0.55)';
+    ctx.beginPath(); ctx.arc(52, -8, 4, 0, 6.2832); ctx.fill();
+
+    // big white beard
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.moveTo(30, -10);
+    ctx.quadraticCurveTo(28, 26, 50, 32);
+    ctx.quadraticCurveTo(66, 22, 62, -8);
+    ctx.quadraticCurveTo(50, -2, 30, -10);
+    ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = '#dbe6f0'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(44, 8); ctx.quadraticCurveTo(46, 18, 44, 24); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(54, 8); ctx.quadraticCurveTo(55, 16, 53, 22); ctx.stroke();
+    // moustache
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath(); ctx.ellipse(58, -7, 9, 4.5, 0.2, 0, 6.2832); ctx.fill();
+    // regulator + hose to tank
+    ctx.fillStyle = '#374151'; ctx.beginPath(); ctx.arc(62, -3, 4, 0, 6.2832); ctx.fill();
+    ctx.strokeStyle = '#374151'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(60, -4); ctx.quadraticCurveTo(10, -44, -34, -34); ctx.stroke();
+
+    ctx.restore();
+  }
+
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  // mouth position in screen coords (matches regulator at local 62,-3)
+  function mouthPos() {
+    var c = Math.cos(diver.tilt), s = Math.sin(diver.tilt);
+    var lx = 66, ly = -4;
+    var rx = lx * c - ly * s, ry = lx * s + ly * c;
+    return { x: diver.x + rx * S * diver.face, y: diver.y + ry * S };
+  }
+
+  function spawnBubble() {
+    var m = mouthPos();
+    bubbles.push({
+      x: m.x + (Math.random() - 0.5) * 4 * S, y: m.y,
+      r: (2.5 + Math.random() * 6) * S,
+      vy: (35 + Math.random() * 40) * S,
+      ph: Math.random() * 6.28, amp: (6 + Math.random() * 10) * S, fr: 2 + Math.random() * 2,
+      baseX: m.x, life: 1
+    });
+  }
+
+  var last = 0, clock = 0;
+  function frame(ts) {
+    var dt = Math.min(0.05, (ts - last) / 1000 || 0.016);
+    last = ts; clock += dt;
+
+    // smooth follow: ease toward the pointer, with a top speed
+    var dx = target.x - diver.x, dy = target.y - diver.y;
+    var dist = Math.sqrt(dx * dx + dy * dy);
+    var desired = Math.min(dist * 2.2, 380 * S);          // slows down as it arrives
+    var dvx = dist > 1 ? dx / dist * desired : 0;
+    var dvy = dist > 1 ? dy / dist * desired : 0;
+    var k = 1 - Math.exp(-6 * dt);                         // velocity smoothing
+    diver.vx += (dvx - diver.vx) * k;
+    diver.vy += (dvy - diver.vy) * k;
+    diver.x += diver.vx * dt; diver.y += diver.vy * dt;
+
+    var speed = Math.sqrt(diver.vx * diver.vx + diver.vy * diver.vy);
+    if (Math.abs(diver.vx) > 12 * S) diver.face = diver.vx > 0 ? 1 : -1;
+    var wantTilt = Math.max(-0.7, Math.min(0.7, (diver.vy * diver.face === 0 ? 0 : diver.vy / (Math.abs(diver.vx) + 120 * S) ) * 0.9));
+    diver.tilt += (wantTilt - diver.tilt) * (1 - Math.exp(-5 * dt));
+    diver.kick += dt * (3 + Math.min(speed / (S * 40), 9));
+
+    // idle bob
+    var bob = Math.sin(clock * 2) * 3 * S * (1 - Math.min(1, speed / (60 * S)));
+    var realY = diver.y; diver.y += bob;
+
+    // bubbles: steady stream, slightly more when swimming
+    bubbleTimer += dt;
+    var interval = 0.16 - Math.min(0.08, speed / (S * 4000));
+    while (bubbleTimer > interval) { bubbleTimer -= interval; spawnBubble(); }
+    for (var i = bubbles.length - 1; i >= 0; i--) {
+      var b = bubbles[i];
+      b.y -= b.vy * dt;
+      b.ph += b.fr * dt;
+      b.x = b.baseX + Math.sin(b.ph) * b.amp;
+      if (b.y < H * 0.25) b.life -= dt * 1.2;              // fade near the top
+      if (b.y < -20 || b.life <= 0) bubbles.splice(i, 1);
+    }
+
+    drawSea(clock);
+    drawBubbles();
+    drawDiver(clock);
+    diver.y = realY;
+    requestAnimationFrame(frame);
+  }
+
+  window.__scene = { diver: diver, target: target, bubbles: bubbles };
+  resize();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
